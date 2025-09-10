@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Calculator, TrendingUp, BarChart3, Users, Zap } from 'lucide-react';
 
 const App = () => {
@@ -6,11 +6,11 @@ const App = () => {
   const [playerB, setPlayerB] = useState({ name: '編成B', wins: '', losses: '' });
 
   // Wilson信頼区間の計算
-  const calculateWilsonInterval = (wins, total, confidence = 0.95) => {
+  const calculateWilsonInterval = (wins: number, total: number, confidence = 0.95) => {
     if (total === 0) return { lower: 0, upper: 0, point: 0 };
     
     // 信頼度に応じたz値を計算
-    const getZValue = (conf) => {
+    const getZValue = (conf: number) => {
       if (conf === 0.95) return 1.96;
       if (conf === 0.50) return 0.674;
       // その他の信頼度の場合の近似計算
@@ -31,7 +31,7 @@ const App = () => {
   };
 
   // 2標本比率検定
-  const twoProportionTest = (wins1, total1, wins2, total2) => {
+  const twoProportionTest = (wins1: number, total1: number, wins2: number, total2: number) => {
     if (total1 === 0 || total2 === 0) return null;
     
     const p1 = wins1 / total1;
@@ -48,12 +48,12 @@ const App = () => {
   };
 
   // 正規分布の累積分布関数（近似）
-  const normalCDF = (x) => {
+  const normalCDF = (x: number) => {
     return 0.5 * (1 + erf(x / Math.sqrt(2)));
   };
 
   // 誤差関数の近似
-  const erf = (x) => {
+  const erf = (x: number) => {
     const a1 =  0.254829592;
     const a2 = -0.284496736;
     const a3 =  1.421413741;
@@ -71,13 +71,13 @@ const App = () => {
   };
 
   // Cohen's h効果量
-  const calculateCohenH = (p1, p2) => {
+  const calculateCohenH = (p1: number, p2: number) => {
     const h = 2 * (Math.asin(Math.sqrt(p1)) - Math.asin(Math.sqrt(p2)));
     return h;
   };
 
   // ベイズ推定（ベータ分布）- プレイヤーAが強い確率
-  const calculateBayesianProbability = (winsA, totalA, winsB, totalB) => {
+  const calculateBayesianProbability = (winsA: number, totalA: number, winsB: number, totalB: number) => {
     // ベータ分布のサンプリング近似
     const samples = 10000;
     let countAWins = 0;
@@ -92,14 +92,14 @@ const App = () => {
   };
 
   // ベータ分布からのランダムサンプリング（近似）
-  const betaRandom = (alpha, beta) => {
+  const betaRandom = (alpha: number, beta: number): number => {
     const gamma1 = gammaRandom(alpha);
     const gamma2 = gammaRandom(beta);
     return gamma1 / (gamma1 + gamma2);
   };
 
   // ガンマ分布からのランダムサンプリング（近似）
-  const gammaRandom = (shape) => {
+  const gammaRandom = (shape: number): number => {
     // 簡易実装（形状パラメータが1以上の場合）
     if (shape < 1) return gammaRandom(shape + 1) * Math.pow(Math.random(), 1/shape);
     
@@ -127,18 +127,19 @@ const App = () => {
   };
 
   // 正規分布からのランダムサンプリング
-  const normalRandom = () => {
+  let normalRandomSpare: number | undefined;
+  const normalRandom = (): number => {
     // Box-Muller変換
-    if (normalRandom.spare !== undefined) {
-      const tmp = normalRandom.spare;
-      delete normalRandom.spare;
+    if (normalRandomSpare !== undefined) {
+      const tmp = normalRandomSpare;
+      normalRandomSpare = undefined;
       return tmp;
     }
     
     const u1 = Math.random();
     const u2 = Math.random();
     const mag = Math.sqrt(-2 * Math.log(u1));
-    normalRandom.spare = mag * Math.cos(2 * Math.PI * u2);
+    normalRandomSpare = mag * Math.cos(2 * Math.PI * u2);
     return mag * Math.sin(2 * Math.PI * u2);
   };
 
@@ -196,18 +197,18 @@ const App = () => {
     };
   }, [statsA, statsB]);
 
-  const formatPercentage = (value) => {
+  const formatPercentage = (value: number) => {
     return (value * 100).toFixed(1);
   };
 
-  const getSignificanceLevel = (pValue) => {
+  const getSignificanceLevel = (pValue: number) => {
     if (pValue < 0.001) return '***（非常に高い有意性）';
     if (pValue < 0.01) return '**（高い有意性）';
     if (pValue < 0.05) return '*（有意）';
     return '（有意でない）';
   };
 
-  const getEffectSize = (h) => {
+  const getEffectSize = (h: number) => {
     const absH = Math.abs(h);
     if (absH < 0.2) return '小さい';
     if (absH < 0.5) return '中程度';
@@ -547,19 +548,19 @@ const App = () => {
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <span>総試合数:</span>
-                        <span className="font-bold">{statsA.total}</span>
+                        <span className="font-bold">{statsA!.total}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>勝率:</span>
-                        <span className="font-bold text-blue-600">{formatPercentage(statsA.interval95.point)}%</span>
+                        <span className="font-bold text-blue-600">{formatPercentage(statsA!.interval95.point)}%</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span>95%信頼区間:</span>
-                        <span>{formatPercentage(statsA.interval95.lower)}% - {formatPercentage(statsA.interval95.upper)}%</span>
+                        <span>{formatPercentage(statsA!.interval95.lower)}% - {formatPercentage(statsA!.interval95.upper)}%</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span>50%信頼区間:</span>
-                        <span>{formatPercentage(statsA.interval50.lower)}% - {formatPercentage(statsA.interval50.upper)}%</span>
+                        <span>{formatPercentage(statsA!.interval50.lower)}% - {formatPercentage(statsA!.interval50.upper)}%</span>
                       </div>
                     </div>
                   </div>
@@ -570,19 +571,19 @@ const App = () => {
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <span>総試合数:</span>
-                        <span className="font-bold">{statsB.total}</span>
+                        <span className="font-bold">{statsB!.total}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>勝率:</span>
-                        <span className="font-bold text-red-600">{formatPercentage(statsB.interval95.point)}%</span>
+                        <span className="font-bold text-red-600">{formatPercentage(statsB!.interval95.point)}%</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span>95%信頼区間:</span>
-                        <span>{formatPercentage(statsB.interval95.lower)}% - {formatPercentage(statsB.interval95.upper)}%</span>
+                        <span>{formatPercentage(statsB!.interval95.lower)}% - {formatPercentage(statsB!.interval95.upper)}%</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span>50%信頼区間:</span>
-                        <span>{formatPercentage(statsB.interval50.lower)}% - {formatPercentage(statsB.interval50.upper)}%</span>
+                        <span>{formatPercentage(statsB!.interval50.lower)}% - {formatPercentage(statsB!.interval50.upper)}%</span>
                       </div>
                     </div>
                   </div>
@@ -658,7 +659,7 @@ const App = () => {
                         <div>
                           <div className="flex justify-between text-sm mb-1">
                             <span className="text-blue-700">{playerA.name}</span>
-                            <span>{formatPercentage(statsA.interval95.point)}%</span>
+                            <span>{formatPercentage(statsA!.interval95.point)}%</span>
                           </div>
                           <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
                             {/* 50%基準線 */}
@@ -666,13 +667,13 @@ const App = () => {
                             <div 
                               className="absolute h-full bg-gradient-to-r from-blue-300 to-blue-400 rounded-full"
                               style={{
-                                left: `${statsA.interval95.lower * 100}%`,
-                                width: `${(statsA.interval95.upper - statsA.interval95.lower) * 100}%`
+                                left: `${statsA!.interval95.lower * 100}%`,
+                                width: `${(statsA!.interval95.upper - statsA!.interval95.lower) * 100}%`
                               }}
                             />
                             <div 
                               className="absolute w-0.5 h-full bg-blue-800 z-10"
-                              style={{ left: `${statsA.interval95.point * 100}%` }}
+                              style={{ left: `${statsA!.interval95.point * 100}%` }}
                             />
                           </div>
                         </div>
@@ -681,7 +682,7 @@ const App = () => {
                         <div>
                           <div className="flex justify-between text-sm mb-1">
                             <span className="text-red-700">{playerB.name}</span>
-                            <span>{formatPercentage(statsB.interval95.point)}%</span>
+                            <span>{formatPercentage(statsB!.interval95.point)}%</span>
                           </div>
                           <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
                             {/* 50%基準線 */}
@@ -689,13 +690,13 @@ const App = () => {
                             <div 
                               className="absolute h-full bg-gradient-to-r from-red-300 to-red-400 rounded-full"
                               style={{
-                                left: `${statsB.interval95.lower * 100}%`,
-                                width: `${(statsB.interval95.upper - statsB.interval95.lower) * 100}%`
+                                left: `${statsB!.interval95.lower * 100}%`,
+                                width: `${(statsB!.interval95.upper - statsB!.interval95.lower) * 100}%`
                               }}
                             />
                             <div 
                               className="absolute w-0.5 h-full bg-red-800 z-10"
-                              style={{ left: `${statsB.interval95.point * 100}%` }}
+                              style={{ left: `${statsB!.interval95.point * 100}%` }}
                             />
                           </div>
                         </div>
@@ -710,7 +711,7 @@ const App = () => {
                         <div>
                           <div className="flex justify-between text-sm mb-1">
                             <span className="text-blue-700">{playerA.name}</span>
-                            <span>{formatPercentage(statsA.interval50.point)}%</span>
+                            <span>{formatPercentage(statsA!.interval50.point)}%</span>
                           </div>
                           <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
                             {/* 50%基準線 */}
@@ -718,13 +719,13 @@ const App = () => {
                             <div 
                               className="absolute h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full"
                               style={{
-                                left: `${statsA.interval50.lower * 100}%`,
-                                width: `${(statsA.interval50.upper - statsA.interval50.lower) * 100}%`
+                                left: `${statsA!.interval50.lower * 100}%`,
+                                width: `${(statsA!.interval50.upper - statsA!.interval50.lower) * 100}%`
                               }}
                             />
                             <div 
                               className="absolute w-0.5 h-full bg-blue-800 z-10"
-                              style={{ left: `${statsA.interval50.point * 100}%` }}
+                              style={{ left: `${statsA!.interval50.point * 100}%` }}
                             />
                           </div>
                         </div>
@@ -733,7 +734,7 @@ const App = () => {
                         <div>
                           <div className="flex justify-between text-sm mb-1">
                             <span className="text-red-700">{playerB.name}</span>
-                            <span>{formatPercentage(statsB.interval50.point)}%</span>
+                            <span>{formatPercentage(statsB!.interval50.point)}%</span>
                           </div>
                           <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
                             {/* 50%基準線 */}
@@ -741,13 +742,13 @@ const App = () => {
                             <div 
                               className="absolute h-full bg-gradient-to-r from-red-500 to-red-600 rounded-full"
                               style={{
-                                left: `${statsB.interval50.lower * 100}%`,
-                                width: `${(statsB.interval50.upper - statsB.interval50.lower) * 100}%`
+                                left: `${statsB!.interval50.lower * 100}%`,
+                                width: `${(statsB!.interval50.upper - statsB!.interval50.lower) * 100}%`
                               }}
                             />
                             <div 
                               className="absolute w-0.5 h-full bg-red-800 z-10"
-                              style={{ left: `${statsB.interval50.point * 100}%` }}
+                              style={{ left: `${statsB!.interval50.point * 100}%` }}
                             />
                           </div>
                         </div>
