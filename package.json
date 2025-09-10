@@ -1,9 +1,9 @@
 {
-  "name": "winrate-app",
+  "name": "WinRateChecker",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://tachi1427BA.github.io/winrate-app",
+  "homepage": "https://tachi1427BA.github.io/WinRateChecker",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
