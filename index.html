@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>編成勝率比較統計ツール</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide-react/0.263.1/umd/lucide-react.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+        const { Calculator, TrendingUp, BarChart3, Users, Zap } = lucideReact;
+
+        const PlayerComparisonTool = () => {
+            const [playerA, setPlayerA] = useState({ name: '編成A', wins: '', losses: '' });
+            const [playerB, setPlayerB] = useState({ name: '編成B', wins: '', losses: '' });
+
+            // Wilson信頼区間の計算
+            const calculateWilsonInterval = (wins, total, confidence = 0.95) => {
+                if (total === 0) return { lower: 0, upper: 0, point: 0 };
+                
+                // 信頼度に応じたz値を計算
+                const getZValue = (conf) => {
+                    if (conf === 0.95) return 1.96;
+                    if (conf === 0.50) return 0.674;
+                    // その他の信頼度の場合の近似計算
+                    return Math.sqrt(2) * Math.sqrt(-Math.log(1 - conf));
+                };
+                
+                const z = getZValue(confidence);
+                const p = wins / total;
+                const denominator = 1 + (z * z) / total;
+                const center = (p + (z * z) / (2 * total)) / denominator;
+                const margin = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * total)) / total) / denominator;
+                
+                return {
+                    point: p,
+                    lower: Math.max(0, center - margin),
+                    upper: Math.min(1, center + margin)
+                };
+            };
+
+            // 2標本比率検定
+            const twoProportionTest = (wins1, total1, wins2, total2) => {
+                if (total1 === 0 || total2 === 0) return null;
+                
+                const p1 = wins1 / total1;
+                const p2 = wins2 / total2;
+                const pooledP = (wins1 + wins2) / (total1 + total2);
+                const standardError = Math.sqrt(pooledP * (1 - pooledP) * (1/total1 + 1/total2));
+                
+                if (standardError === 0) return null;
+                
+                const z = (p1 - p2) / standardError;
+                const pValue = 2 * (1 - normalCDF(Math.abs(z))); // 両側検定
+                
+                return { z, pValue, difference: p1 - p2 };
+            };
+
+            // 正規分布の累積分布関数（近似）
+            const normalCDF = (x) => {
+                return 0.5 * (1 + erf(x / Math.sqrt(2)));
+            };
+
+            // 誤差関数の近似
+            const erf = (x) => {
+                const a1 =  0.254829592;
+                const a2 = -0.284496736;
+                const a3 =  1.421413741;
+                const a4 = -1.453152027;
+                const a5 =  1.061405429;
+                const p  =  0.3275911;
+
+                const sign = x < 0 ? -1 : 1;
+                x = Math.abs(x);
+
+                const t = 1.0 / (1.0 + p * x);
+                const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+
+                return sign * y;
+            };
+
+            // Cohen's h効果量
+            const calculateCohenH = (p1, p2) => {
+                const h = 2 * (Math.asin(Math.sqrt(p1)) - Math.asin(Math.sqrt(p2)));
+                return h;
+            };
+
+            // ベイズ推定（ベータ分布）- プレイヤーAが強い確率
+            const calculateBayesianProbability = (winsA, totalA, winsB, totalB) => {
+                // ベータ分布のサンプリング近似
+                const samples = 10000;
+                let countAWins = 0;
+
+                for (let i = 0; i < samples; i++) {
+                    const pA = betaRandom(winsA + 1, totalA - winsA + 1);
+                    const pB = betaRandom(winsB + 1, totalB - winsB + 1);
+                    if (pA > pB) countAWins++;
+                }
+
+                return countAWins / samples;
+            };
+
+            // ベータ分布からのランダムサンプリング（近似）
+            const betaRandom = (alpha, beta) => {
+                const gamma1 = gammaRandom(alpha);
+                const gamma2 = gammaRandom(beta);
+                return gamma1 / (gamma1 + gamma2);
+            };
+
+            // ガンマ分布からのランダムサンプリング（近似）
+            const gammaRandom = (shape) => {
+                // 簡易実装（形状パラメータが1以上の場合）
+                if (shape < 1) return gammaRandom(shape + 1) * Math.pow(Math.random(), 1/shape);
+                
+                const d = shape - 1/3;
+                const c = 1 / Math.sqrt(9 * d);
+                
+                while (true) {
+                    let x, v;
+                    do {
+                        x = normalRandom();
+                        v = 1 + c * x;
+                    } while (v <= 0);
+                    
+                    v = v * v * v;
+                    const u = Math.random();
+                    
+                    if (u < 1 - 0.0331 * x * x * x * x) {
+                        return d * v;
+                    }
+                    
+                    if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) {
+                        return d * v;
+                    }
+                }
+            };
+
+            // 正規分布からのランダムサンプリング
+            const normalRandom = () => {
+                // Box-Muller変換
+                if (normalRandom.spare !== undefined) {
+                    const tmp = normalRandom.spare;
+                    delete normalRandom.spare;
+                    return tmp;
+                }
+                
+                const u1 = Math.random();
+                const u2 = Math.random();
+                const mag = Math.sqrt(-2 * Math.log(u1));
+                normalRandom.spare = mag * Math.cos(2 * Math.PI * u2);
+                return mag * Math.sin(2 * Math.PI * u2);
+            };
+
+            // 個別編成の統計
+            const statsA = useMemo(() => {
+                const winsA = parseInt(playerA.wins) || 0;
+                const lossesA = parseInt(playerA.losses) || 0;
+                const totalA = winsA + lossesA;
+                
+                if (totalA === 0) return null;
+                
+                const interval95 = calculateWilsonInterval(winsA, totalA, 0.95);
+                const interval50 = calculateWilsonInterval(winsA, totalA, 0.50);
+                return { 
+                    wins: winsA, 
+                    losses: lossesA, 
+                    total: totalA, 
+                    interval95, 
+                    interval50 
+                };
+            }, [playerA]);
+
+            const statsB = useMemo(() => {
+                const winsB = parseInt(playerB.wins) || 0;
+                const lossesB = parseInt(playerB.losses) || 0;
+                const totalB = winsB + lossesB;
+                
+                if (totalB === 0) return null;
+                
+                const interval95 = calculateWilsonInterval(winsB, totalB, 0.95);
+                const interval50 = calculateWilsonInterval(winsB, totalB, 0.50);
+                return { 
+                    wins: winsB, 
+                    losses: lossesB, 
+                    total: totalB, 
+                    interval95, 
+                    interval50 
+                };
+            }, [playerB]);
+
+            // 比較統計（両方の編成データが揃った場合のみ）
+            const comparisonStats = useMemo(() => {
+                if (!statsA || !statsB) return null;
+                
+                const test = twoProportionTest(statsA.wins, statsA.total, statsB.wins, statsB.total);
+                const cohenH = calculateCohenH(statsA.interval95.point, statsB.interval95.point);
+                const bayesianProb = calculateBayesianProbability(statsA.wins, statsA.total, statsB.wins, statsB.total);
+                
+                return {
+                    test,
+                    cohenH,
+                    bayesianProb,
+                    intervalsOverlap95: statsA.interval95.upper >= statsB.interval95.lower && statsB.interval95.upper >= statsA.interval95.lower,
+                    intervalsOverlap50: statsA.interval50.upper >= statsB.interval50.lower && statsB.interval50.upper >= statsA.interval50.lower
+                };
+            }, [statsA, statsB]);
+
+            const formatPercentage = (value) => {
+                return (value * 100).toFixed(1);
+            };
+
+            const getSignificanceLevel = (pValue) => {
+                if (pValue < 0.001) return '***（非常に高い有意性）';
+                if (pValue < 0.01) return '**（高い有意性）';
+                if (pValue < 0.05) return '*（有意）';
+                return '（有意でない）';
+            };
+
+            const getEffectSize = (h) => {
+                const absH = Math.abs(h);
+                if (absH < 0.2) return '小さい';
+                if (absH < 0.5) return '中程度';
+                if (absH < 0.8) return '大きい';
+                return '非常に大きい';
+            };
+
+            return (
+                <div className="max-w-4xl mx-auto p-6 bg-gradient-to-br from-purple-50 to-blue-100 min-h-screen">
+                    <div className="bg-white rounded-lg shadow-lg p-8">
+                        <div className="flex items-center gap-3 mb-8">
+                            <Users className="w-8 h-8 text-purple-600" />
+                            <h1 className="text-2xl font-bold text-gray-800">編成勝率比較統計ツール</h1>
+                        </div>
+
+                        <div className="space-y-8">
+                            {/* 編成入力セクション */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* 編成A */}
+                                <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
+                                    <h2 className="text-lg font-semibold text-blue-700 mb-4 flex items-center gap-2">
+                                        <BarChart3 className="w-5 h-5" />
+                                        編成A
+                                    </h2>
+                                    <div className="space-y-4">
+                                        <input
+                                            type="text"
+                                            value={playerA.name}
+                                            onChange={(e) => setPlayerA({...playerA, name: e.target.value})}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            placeholder="編成名"
+                                        />
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-600 mb-1">勝利数</label>
+                                                <input
+                                                    type="number"
+                                                    value={playerA.wins}
+                                                    onChange={(e) => setPlayerA({...playerA, wins: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    placeholder="0"
+                                                    min="0"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-600 mb-1">敗北数</label>
+                                                <input
+                                                    type="number"
+                                                    value={playerA.losses}
+                                                    onChange={(e) => setPlayerA({...playerA, losses: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                    placeholder="0"
+                                                    min="0"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 編成B */}
+                                <div className="bg-red-50 p-6 rounded-lg border border-red-200">
+                                    <h2 className="text-lg font-semibold text-red-700 mb-4 flex items-center gap-2">
+                                        <BarChart3 className="w-5 h-5" />
+                                        編成B
+                                    </h2>
+                                    <div className="space-y-4">
+                                        <input
+                                            type="text"
+                                            value={playerB.name}
+                                            onChange={(e) => setPlayerB({...playerB, name: e.target.value})}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                                            placeholder="編成名"
+                                        />
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-600 mb-1">勝利数</label>
+                                                <input
+                                                    type="number"
+                                                    value={playerB.wins}
+                                                    onChange={(e) => setPlayerB({...playerB, wins: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                                                    placeholder="0"
+                                                    min="0"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-600 mb-1">敗北数</label>
+                                                <input
+                                                    type="number"
+                                                    value={playerB.losses}
+                                                    onChange={(e) => setPlayerB({...playerB, losses: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                                                    placeholder="0"
+                                                    min="0"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 個別編成統計セクション */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* 編成A統計 */}
+                                {statsA && (
+                                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200">
+                                        <h2 className="text-lg font-semibold text-blue-700 mb-4 flex items-center gap-2">
+                                            <TrendingUp className="w-5 h-5" />
+                                            {playerA.name} 統計
+                                        </h2>
+                                        
+                                        <div className="space-y-4">
+                                            {/* 基本情報 */}
+                                            <div className="grid grid-cols-3 gap-2 text-center">
+                                                <div className="bg-white p-3 rounded-lg">
+                                                    <div className="text-xl font-bold text-blue-600">{statsA.total}</div>
+                                                    <div className="text-xs text-gray-600">総試合数</div>
+                                                </div>
+                                                <div className="bg-white p-3 rounded-lg">
+                                                    <div className="text-xl font-bold text-green-600">{statsA.wins}</div>
+                                                    <div className="text-xs text-gray-600">勝利</div>
+                                                </div>
+                                                <div className="bg-white p-3 rounded-lg">
+                                                    <div className="text-xl font-bold text-red-600">{statsA.losses}</div>
+                                                    <div className="text-xs text-gray-600">敗北</div>
+                                                </div>
+                                            </div>
+
+                                            {/* 勝率情報 */}
+                                            <div className="bg-white p-4 rounded-lg">
+                                                <div className="text-center mb-3">
+                                                    <div className="text-2xl font-bold text-blue-600">
+                                                        {formatPercentage(statsA.interval95.point)}%
+                                                    </div>
+                                                    <div className="text-sm text-gray-600">推定勝率</div>
+                                                </div>
+
+                                                <div className="border-t pt-3 space-y-2">
+                                                    <div className="text-center">
+                                                        <div className="text-sm font-semibold text-gray-700 mb-1">
+                                                            95% 信頼区間
+                                                        </div>
+                                                        <div className="text-lg font-bold text-purple-600">
+                                                            {formatPercentage(statsA.interval95.lower)}% 〜 {formatPercentage(statsA.interval95.upper)}%
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="text-center">
+                                                        <div className="text-sm font-semibold text-gray-700 mb-1">
+                                                            50% 信頼区間
+                                                        </div>
+                                                        <div className="text-md font-bold text-indigo-600">
+                                                            {formatPercentage(statsA.interval50.lower)}% 〜 {formatPercentage(statsA.interval50.upper)}%
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* 視覚的な信頼区間 */}
+                                                <div className="mt-4 space-y-2">
+                                                    {/* 95%信頼区間 */}
+                                                    <div>
+                                                        <div className="text-xs text-gray-600 mb-1">95%信頼区間</div>
+                                                        <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
+                                                            {/* 50%基準線 */}
+                                                            <div className="absolute w-0.5 h-full bg-gray-600 z-20" style={{ left: '50%' }} />
+                                                            <div 
+                                                                className="absolute h-full bg-gradient-to-r from-blue-300 to-blue-400 rounded-full"
+                                                                style={{
+                                                                    left: `${statsA.interval95.lower * 100}%`,
+                                                                    width: `${(statsA.interval95.upper - statsA.interval95.lower) * 100}%`
+                                                                }}
+                                                            />
+                                                            <div 
+                                                                className="absolute w-0.5 h-full bg-blue-800 z-10"
+                                                                style={{ left: `${statsA.interval95.point * 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {/* 50%信頼区間 */}
+                                                    <div>
+                                                        <div className="text-xs text-gray-600 mb-1">50%信頼区間</div>
+                                                        <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
+                                                            {/* 50%基準線 */}
+                                                            <div className="absolute w-0.5 h-full bg-gray-600 z-20" style={{ left: '50%' }} />
+                                                            <div 
+                                                                className="absolute h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full"
+                                                                style={{
+                                                                    left: `${statsA.interval50.lower * 100}%`,
+                                                                    width: `${(statsA.interval50.upper - statsA.interval50.lower) * 100}%`
+                                                                }}
+                                                            />
+                                                            <div 
+                                                                className="absolute w-0.5 h-full bg-blue-800 z-10"
+                                                                style={{ left: `${statsA.interval50.point * 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                                                        <span>0%</span>
+                                                        <span>25%</span>
+                                                        <span className="font-semibold">50%</span>
+                                                        <span>75%</span>
+                                                        <span>100%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 編成B統計 */}
+                                {statsB && (
+                                    <div className="bg-gradient-to-r from-red-50 to-pink-50 p-6 rounded-lg border border-red-200">
+                                        <h2 className="text-lg font-semibold text-red-700 mb-4 flex items-center gap-2">
+                                            <TrendingUp className="w-5 h-5" />
+                                            {playerB.name} 統計
+                                        </h2>
+                                        
+                                        <div className="space-y-4">
+                                            {/* 基本情報 */}
+                                            <div className="grid grid-cols-3 gap-2 text-center">
+                                                <div className="bg-white p-3 rounded-lg">
+                                                    <div className="text-xl font-bold text-red-600">{statsB.total}</div>
+                                                    <div className="text-xs text-gray-600">総試合数</div>
+                                                </div>
+                                                <div className="bg-white p-3 rounded-lg">
+                                                    <div className="text-xl font-bold text-green-600">{statsB.wins}</div>
+                                                    <div className="text-xs text-gray-600">勝利</div>
+                                                </div>
+                                                <div className="bg-white p-3 rounded-lg">
+                                                    <div className="text-xl font-bold text-red-600">{statsB.losses}</div>
+                                                    <div className="text-xs text-gray-600">敗北</div>
+                                                </div>
+                                            </div>
+
+                                            {/* 勝率情報 */}
+                                            <div className="bg-white p-4 rounded-lg">
+                                                <div className="text-center mb-3">
+                                                    <div className="text-2xl font-bold text-red-600">
+                                                        {formatPercentage(statsB.interval95.point)}%
+                                                    </div>
+                                                    <div className="text-sm text-gray-600">推定勝率</div>
+                                                </div>
+
+                                                <div className="border-t pt-3 space-y-2">
+                                                    <div className="text-center">
+                                                        <div className="text-sm font-semibold text-gray-700 mb-1">
+                                                            95% 信頼区間
+                                                        </div>
+                                                        <div className="text-lg font-bold text-purple-600">
+                                                            {formatPercentage(statsB.interval95.lower)}% 〜 {formatPercentage(statsB.interval95.upper)}%
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="text-center">
+                                                        <div className="text-sm font-semibold text-gray-700 mb-1">
+                                                            50% 信頼区間
+                                                        </div>
+                                                        <div className="text-md font-bold text-indigo-600">
+                                                            {formatPercentage(statsB.interval50.lower)}% 〜 {formatPercentage(statsB.interval50.upper)}%
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* 視覚的な信頼区間 */}
+                                                <div className="mt-4 space-y-2">
+                                                    {/* 95%信頼区間 */}
+                                                    <div>
+                                                        <div className="text-xs text-gray-600 mb-1">95%信頼区間</div>
+                                                        <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
+                                                            {/* 50%基準線 */}
+                                                            <div className="absolute w-0.5 h-full bg-gray-600 z-20" style={{ left: '50%' }} />
+                                                            <div 
+                                                                className="absolute h-full bg-gradient-to-r from-red-300 to-red-400 rounded-full"
+                                                                style={{
+                                                                    left: `${statsB.interval95.lower * 100}%`,
+                                                                    width: `${(statsB.interval95.upper - statsB.interval95.lower) * 100}%`
+                                                                }}
+                                                            />
+                                                            <div 
+                                                                className="absolute w-0.5 h-full bg-red-800 z-10"
+                                                                style={{ left: `${statsB.interval95.point * 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {/* 50%信頼区間 */}
+                                                    <div>
+                                                        <div className="text-xs text-gray-600 mb-1">50%信頼区間</div>
+                                                        <div className="relative h-4 bg-gray-200 rounded-full overflow-hidden">
+                                                            {/* 50%基準線 */}
+                                                            <div className="absolute w-0.5 h-full bg-gray-600 z-20" style={{ left: '50%' }} />
+                                                            <div 
+                                                                className="absolute h-full bg-gradient-to-r from-red-500 to-red-600 rounded-full"
+                                                                style={{
+                                                                    left: `${statsB.interval50.lower * 100}%`,
+                                                                    width: `${(statsB.interval50.upper - statsB.interval50.lower) * 100}%`
+                                                                }}
+                                                            />
+                                                            <div 
+                                                                className="absolute w-0.5 h-full bg-red-800 z-10"
+                                                                style={{ left: `${statsB.interval50.point * 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                                                        <span>0%</span>
+                                                        <span>25%</span>
+                                                        <span className="font-semibold">50%</span>
+                                                        <span>75%</span>
+                                                        <span>100%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 比較結果セクション（両方の編成データが揃った場合のみ） */}
+                            {comparisonStats && (
+                                <div className="space-y-6">
+                                    {/* 基本比較統計 */}
+                                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-lg border border-purple-200">
+                                        <h2 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                                            <Calculator className="w-5 h-5" />
+                                            編成比較
+                                        </h2>
+                                        
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {/* 編成A要約 */}
+                                            <div className="bg-white p-4 rounded-lg">
+                                                <h3 className="font-semibold text-blue-700 mb-3">{playerA.name}</h3>
+                                                <div className="space-y-2">
+                                                    <div className="flex justify-between">
+                                                        <span>総試合数:</span>
+                                                        <span className="font-bold">{statsA.total}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>勝率:</span>
+                                                        <span className="font-bold text-blue-600">{formatPercentage(statsA.interval95.point)}%</span>
+                                                    </div>
+                                                    <div className="flex justify-between text-sm">
+                                                        <span>95%信頼区間:</span>
+                                                        <span>{formatPercentage(statsA.interval95.lower)}% - {formatPercentage(statsA.interval95.upper)}%</span>
+                                                    </div>
+                                                    <div className="flex justify-between text-sm">
+                                                        <span>50%信頼区間:</span>
+                                                        <span>{formatPercentage(statsA.interval50.lower)}% - {formatPercentage(statsA.interval50.upper)}%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* 編成B要約 */}
+                                            <div className="bg-white p-4 rounded-lg">
+                                                <h3 className="font-semibold text-red-700 mb-3">{playerB.name}</h3>
+                                                <div className="space-y-2">
+                                                    <div className="flex justify-between">
+                                                        <span>総試合数:</span>
+                                                        <span className="font-bold">{statsB.total}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span>勝率:</span>
+                                                        <span className="font-bold text-red-600">{formatPercentage(statsB.interval95.point)}%</span>
+                                                    </div>
+                                                    <div className="flex justify-between text-sm">
+                                                        <span>95%信頼区間:</span>
+                                                        <span>{formatPercentage(statsB.interval95.lower)}% - {formatPercentage(statsB.interval95.upper)}%</span>
+                                                    </div>
+                                                    <div className="flex justify-between text-sm">
+                                                        <span>50%信頼区間:</span>
+                                                        <span>{formatPercentage(statsB.interval50.lower)}% - {formatPercentage(statsB.interval50.upper)}%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 統計的比較 */}
+                                    <div className="bg-gradient-to-r from-yellow-50 to-orange-50 p-6 rounded-lg border border-yellow-200">
+                                        <h2 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                                            <Zap className="w-5 h-5" />
+                                            統計的比較結果
+                                        </h2>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {/* 統計検定結果 */}
+                                            <div className="bg-white p-4 rounded-lg">
+                                                <h3 className="font-semibold text-gray-700 mb-3">統計的検定</h3>
+                                                {comparisonStats.test && (
+                                                    <div className="space-y-2">
+                                                        <div className="flex justify-between">
+                                                            <span>勝率の差:</span>
+                                                            <span className="font-bold">{formatPercentage(Math.abs(comparisonStats.test.difference))}%</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                            <span>z統計量:</span>
+                                                            <span className="font-bold">{comparisonStats.test.z.toFixed(3)}</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                            <span>p値:</span>
+                                                            <span className="font-bold">{comparisonStats.test.pValue.toFixed(6)}</span>
+                                                        </div>
+                                                        <div className="text-sm text-gray-600">
+                                                            {getSignificanceLevel(comparisonStats.test.pValue)}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* 効果量とベイズ推定 */}
+                                            <div className="bg-white p-4 rounded-lg">
+                                                <h3 className="font-semibold text-gray-700 mb-3">効果の大きさ</h3>
+                                                <div className="space-y-2">
+                                                    <div className="flex justify-between">
+                                                        <span>Cohen's h:</span>
+                                                        <span className="font-bold">{Math.abs(comparisonStats.cohenH).toFixed(3)}</span>
+                                                    </div>
+                                                    <div className="text-sm text-gray-600">
+                                                        効果量: {getEffectSize(comparisonStats.cohenH)}
+                                                    </div>
+                                                    <div className="border-t pt-2 mt-3">
+                                                        <div className="flex justify-between">
+                                                            <span>{playerA.name}が強い確率:</span>
+                                                            <span className="font-bold text-purple-600">{formatPercentage(comparisonStats.bayesianProb)}%</span>
+                                                        </div>
+                                                        <div className="flex justify-between">
+                                                            <span>{playerB.name}が強い確率:</span>
+                                                            <span className="font-bold text-purple-600">{formatPercentage(1 - comparisonStats.bayesianProb)}%</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* 結論 */}
+                                        <div className="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
+                                            <h3 className="font-semibold text-green-800 mb-2">📊 統計的結論</h3>
+                                            <div className="text-sm text-green-700 space-y-1">
+                                                {comparisonStats.test && comparisonStats.test.pValue < 0.05 ? (
+                                                    <p>• <strong>統計的に有意な差があります</strong> (p &lt; 0.05)</p>
+                                                ) : (
+                                                    <p>• 統計的に有意な差は検出されませんでした (p ≥ 0.05)</p>
+                                                )}
+                                                <p>• 95%信頼区間の重なり: {comparisonStats.intervalsOverlap95 ? 'あり' : 'なし'}</p>
+                                                <p>• 50%信頼区間の重なり: {comparisonStats.intervalsOverlap50 ? 'あり' : 'なし'}</p>
+                                                <p>• ベイズ推定では<strong>{comparisonStats.bayesianProb > 0.5 ? playerA.name : playerB.name}</strong>が強い可能性が高い（{formatPercentage(Math.max(comparisonStats.bayesianProb, 1 - comparisonStats.bayesianProb))}%）</p>
+                                                <p>• 効果の大きさ: {getEffectSize(comparisonStats.cohenH)}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!statsA && !statsB && (
+                                <div className="text-center py-8 text-gray-500">
+                                    編成の勝敗数を入力してください
+                                </div>
+                            )}
+
+                            {(statsA || statsB) && !comparisonStats && (
+                                <div className="text-center py-4 text-blue-600 bg-blue-50 rounded-lg">
+                                    もう一方の編成データを入力すると、統計的比較が可能になります
+                                </div>
+                            )}
+
+                            {/* 説明セクション */}
+                            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                                <h3 className="font-semibold text-blue-800 mb-2">🔬 統計手法の説明</h3>
+                                <div className="text-sm text-blue-700 space-y-1">
+                                    <p>• <strong>Wilson信頼区間:</strong> 各編成の真の勝率の信頼区間を計算（95%と50%の両方）</p>
+                                    <p>• <strong>95%信頼区間:</strong> 真の勝率が95%の確率でこの範囲内にある</p>
+                                    <p>• <strong>50%信頼区間:</strong> 真の勝率が50%の確率でこの範囲内にある（より狭い範囲）</p>
+                                    <p>• <strong>2標本比率検定:</strong> 2つの編成の勝率が統計的に有意に異なるかを検定</p>
+                                    <p>• <strong>Cohen's h:</strong> 2つの比率の差の効果量（実質的な差の大きさ）</p>
+                                    <p>• <strong>ベイズ推定:</strong> どちらの編成が強い確率を直接計算</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<PlayerComparisonTool />, document.getElementById('root'));
+    </script>
+</body>
+</html>
